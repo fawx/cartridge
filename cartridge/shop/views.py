@@ -1,10 +1,11 @@
 from __future__ import unicode_literals
 from future.builtins import int, str
 
+from decimal import Decimal
 from json import dumps
 
 from django.contrib.auth.decorators import login_required
-from django.contrib.messages import info
+from django.contrib.messages import info, error
 from django.core.urlresolvers import reverse
 from django.db.models import Sum
 from django.http import Http404, HttpResponse
@@ -25,6 +26,8 @@ from cartridge.shop.forms import (AddProductForm, CartItemFormSet,
 from cartridge.shop.models import Product, ProductVariation, Order
 from cartridge.shop.models import DiscountCode
 from cartridge.shop.utils import recalculate_cart, sign
+
+from site_accounts.models import User
 
 try:
     from xhtml2pdf import pisa
@@ -155,6 +158,7 @@ def cart(request, template="shop/cart.html",
     """
     Display cart and handle removing items from the cart.
     """
+
     cart_formset = cart_formset_class(instance=request.cart)
     discount_form = discount_form_class(request, request.POST or None)
     if request.method == "POST":
@@ -184,7 +188,16 @@ def cart(request, template="shop/cart.html",
         else:
             valid = discount_form.is_valid()
             if valid:
-                discount_form.set_discount()
+                if request.POST.get('remove_discount'):
+                    discount_form.set_discount(clear_discount=True)
+                    info(request, 'Discount Removed')
+                else:
+                    if not request.session.get('discount_code'):
+                        discount_form.set_discount()
+                        info(request, 'Discount Updated')
+                    else:
+                        error(request, "There is already a discount code \
+                                        in the cart. Please remove it first.")
             # Potentially need to set shipping if a discount code
             # was previously entered with free shipping, and then
             # another was entered (replacing the old) without
@@ -194,7 +207,10 @@ def cart(request, template="shop/cart.html",
             # shipping details step where shipping is normally set.
             recalculate_cart(request)
         if valid:
-            return redirect("shop_cart")
+            if request.POST.get('referrer'):
+                return redirect( request.POST.get('referrer') )
+            else:
+                return redirect("shop_cart")
     context = {"cart_formset": cart_formset}
     settings.use_editable()
     if (settings.SHOP_DISCOUNT_FIELD_IN_CART and
@@ -261,7 +277,10 @@ def checkout_steps(request, form_class=OrderForm, extra_context=None):
                 # Discount should be set before shipping, to allow
                 # for free shipping to be first set by a discount
                 # code.
-                form.set_discount()
+                if request.POST.get('remove_discount'):
+                    form.set_discount(clear_discount=True)
+                else:
+                    form.set_discount()
                 try:
                     billship_handler(request, form)
                     tax_handler(request, form)

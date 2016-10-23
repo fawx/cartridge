@@ -238,14 +238,15 @@ class DiscountForm(forms.ModelForm):
 
     class Meta:
         model = Order
-        fields = ("discount_code",)
+        fields = ("discount_code", )
 
-    def __init__(self, request, data=None, initial=None):
+    def __init__(self, request, data=None, initial=None, **kwargs):
         """
         Store the request so that it can be used to retrieve the cart
         which is required to validate the discount code when entered.
         """
-        super(DiscountForm, self).__init__(data=data, initial=initial)
+        super(DiscountForm, self).__init__(
+                data=data, initial=initial, **kwargs)
         self._request = request
 
     def clean_discount_code(self):
@@ -264,25 +265,27 @@ class DiscountForm(forms.ModelForm):
                 raise forms.ValidationError(error)
         return code
 
-    def set_discount(self):
+    def set_discount(self, clear_discount=False):
         """
         Assigns the session variables for the discount.
         """
         discount = getattr(self, "_discount", None)
-        if discount is not None:
+        if clear_discount:
+            names = ("shipment", "shipping_type", "shipping_total", "free_shipping", "discount_code", "discount_total")
+            clear_session(self._request, *names)
+
+        if not clear_discount and discount is not None:
             # Clear out any previously defined discount code
             # session vars.
             names = ("free_shipping", "discount_code", "discount_total")
             clear_session(self._request, *names)
             total = self._request.cart.calculate_discount(discount)
-            if discount.free_shipping:
-                set_shipping(self._request, _("Free shipping"), 0)
-            else:
-                # A previously entered discount code providing free
-                # shipping may have been entered prior to this
-                # discount code beign entered, so clear out any
-                # previously set shipping vars.
-                clear_session(self._request, "shipping_type", "shipping_total")
+
+            # A previously entered discount code providing free
+            # shipping may have been entered prior to this
+            # discount code beign entered, so clear out any
+            # previously set shipping vars.
+            clear_session(self._request, ("shipment", "shipping_type", "shipping_total"))
             self._request.session["free_shipping"] = discount.free_shipping
             self._request.session["discount_code"] = discount.code
             self._request.session["discount_total"] = str(total)
@@ -303,11 +306,11 @@ class OrderForm(FormsetForm, DiscountForm):
     card_name = forms.CharField(label=_("Cardholder name"))
     card_type = forms.ChoiceField(label=_("Card type"),
         widget=forms.RadioSelect,
-        choices=make_choices(settings.SHOP_CARD_TYPES))
+        choices=make_choices(settings.SHOP_CARD_TYPES), required=False)
     card_number = forms.CharField(label=_("Card number"))
     card_expiry_month = forms.ChoiceField(label=_("Card expiry month"),
-        initial="%02d" % date.today().month,
         choices=make_choices(["%02d" % i for i in range(1, 13)]))
+        # initial="%02d" % now().month,
     card_expiry_year = forms.ChoiceField(label=_("Card expiry year"))
     card_ccv = forms.CharField(label=_("CCV"), help_text=_("A security code, "
         "usually the last 3 digits found on the back of your card."))
@@ -319,7 +322,9 @@ class OrderForm(FormsetForm, DiscountForm):
                    f.name.startswith("shipping_detail")] +
                    ["additional_instructions", "discount_code"])
 
-    def __init__(self, request, step, data=None, initial=None, errors=None):
+    def __init__(
+            self, request, step, data=None, initial=None, errors=None,
+            **kwargs):
         """
         Setup for each order form step which does a few things:
 
@@ -344,7 +349,8 @@ class OrderForm(FormsetForm, DiscountForm):
         if initial is not None:
             initial["step"] = step
 
-        super(OrderForm, self).__init__(request, data=data, initial=initial)
+        super(OrderForm, self).__init__(
+                request, data=data, initial=initial, **kwargs)
         self._checkout_errors = errors
 
         # Hide discount code field if it shouldn't appear in checkout,
@@ -382,6 +388,7 @@ class OrderForm(FormsetForm, DiscountForm):
         year = now().year
         choices = make_choices(list(range(year, year + 21)))
         self.fields["card_expiry_year"].choices = choices
+        self.fields["card_expiry_year"].initial = year + 1
 
     @classmethod
     def preprocess(cls, data):

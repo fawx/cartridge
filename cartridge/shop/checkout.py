@@ -88,7 +88,6 @@ def initial_order_data(request, form_class=None):
     - last order made by the user, via user ID or cookie
     - matching fields on an authenticated user and profile object
     """
-    from cartridge.shop.forms import OrderForm
     initial = {}
     if request.method == "POST":
         initial = dict(list(request.POST.items()))
@@ -130,7 +129,7 @@ def initial_order_data(request, form_class=None):
             user_models.insert(0, get_profile_for_user(request.user))
         except ProfileNotConfigured:
             pass
-        for order_field in OrderForm._meta.fields:
+        for order_field in form_class._meta.fields:
             check_fields = [order_field]
             for prefix in ("billing_detail_", "shipping_detail_"):
                 if order_field.startswith(prefix):
@@ -149,8 +148,8 @@ def initial_order_data(request, form_class=None):
     # Set initial value for "same billing/shipping" based on
     # whether both sets of address fields are all equal.
     shipping = lambda f: "shipping_%s" % f[len("billing_"):]
-    if any([f for f in OrderForm._meta.fields if f.startswith("billing_") and
-        shipping(f) in OrderForm._meta.fields and
+    if any([f for f in form_class._meta.fields if f.startswith("billing_") and
+        shipping(f) in form_class._meta.fields and
         initial.get(f, "") != initial.get(shipping(f), "")]):
         initial["same_billing_shipping"] = False
     # Never prepopulate discount code.
@@ -183,6 +182,10 @@ def send_order_email(request, order):
                        order.billing_detail_email, context=order_context,
                        addr_bcc=settings.SHOP_ORDER_EMAIL_BCC or None)
 
+    send_mail_template("New Website Order",
+                       'email/order_receipt_admin', settings.SHOP_ORDER_FROM_EMAIL,
+                       settings.SHOP_ORDER_TO_EMAIL, context=order_context,
+                       addr_bcc=settings.SHOP_ORDER_EMAIL_BCC or None)
 
 # Set up some constants for identifying each checkout step.
 

@@ -1,4 +1,3 @@
-
 from __future__ import division, unicode_literals
 from future.builtins import str, super
 from future.utils import with_metaclass
@@ -7,6 +6,7 @@ from decimal import Decimal
 from functools import reduce
 from operator import iand, ior
 
+from django.core.exceptions import ValidationError
 from django.core.urlresolvers import reverse
 from django.db import models, connection
 from django.db.models.signals import m2m_changed
@@ -31,7 +31,6 @@ from mezzanine.utils.models import AdminThumbMixin, upload_to
 from cartridge.shop import fields, managers
 from cartridge.shop.utils import clear_session
 
-
 class Priced(models.Model):
     """
     Abstract model with unit and sale price fields. Inherited by
@@ -43,7 +42,7 @@ class Priced(models.Model):
     sale_price = fields.MoneyField(_("Sale price"))
     sale_from = models.DateTimeField(_("Sale start"), blank=True, null=True)
     sale_to = models.DateTimeField(_("Sale end"), blank=True, null=True)
-    sku = fields.SKUField(unique=True, blank=True, null=True)
+    sku = fields.SKUField(blank=True, null=True)
     num_in_stock = models.IntegerField(_("Number in stock"), blank=True,
                                        null=True)
 
@@ -75,6 +74,12 @@ class Priced(models.Model):
         elif self.has_price():
             return self.unit_price
         return Decimal("0")
+
+    def price_difference(self):
+        return 0 if self.sale_price == None else self.unit_price - self.sale_price
+
+    def price_difference_percent(self):
+        return 0 if self.sale_price == None else self.unit_price / self.sale_price
 
     def copy_price_fields_to(self, obj_to):
         """
@@ -116,6 +121,7 @@ class Product(Displayable, Priced, RichText, AdminThumbMixin):
     class Meta:
         verbose_name = _("Product")
         verbose_name_plural = _("Products")
+        unique_together = ("sku", "site")
 
     def save(self, *args, **kwargs):
         """
@@ -250,6 +256,17 @@ class ProductVariation(with_metaclass(ProductVariationMetaclass, Priced)):
 
     def get_absolute_url(self):
         return self.product.get_absolute_url()
+
+    def validate_unique(self, *args, **kwargs):
+        """
+        Overridden to ensure SKU is unique per site, which can't be
+        defined by ``Meta.unique_together`` since it can't span
+        relationships.
+        """
+        super(ProductVariation, self).validate_unique(*args, **kwargs)
+        if self.__class__.objects.exclude(id=self.id).filter(
+                product__site_id=self.product.site_id, sku=self.sku).exists():
+            raise ValidationError({"sku": _("SKU is not unique")})
 
     @classmethod
     def option_fields(cls):
@@ -391,12 +408,85 @@ class Category(Page, RichText):
 
 @python_2_unicode_compatible
 class Order(SiteRelated):
+    STATES_PROVINCES = (
+        ('AK', 'Alaska'),
+        ('AL', 'Alabama'),
+        ('AR', 'Arkansas'),
+        ('AS', 'American Samoa'),
+        ('AZ', 'Arizona'),
+        ('CA', 'California'),
+        ('CO', 'Colorado'),
+        ('CT', 'Connecticut'),
+        ('DC', 'District of Columbia'),
+        ('DE', 'Delaware'),
+        ('FL', 'Florida'),
+        ('GA', 'Georgia'),
+        ('GU', 'Guam'),
+        ('HI', 'Hawaii'),
+        ('IA', 'Iowa'),
+        ('ID', 'Idaho'),
+        ('IL', 'Illinois'),
+        ('IN', 'Indiana'),
+        ('KS', 'Kansas'),
+        ('KY', 'Kentucky'),
+        ('LA', 'Louisiana'),
+        ('MA', 'Massachusetts'),
+        ('MD', 'Maryland'),
+        ('ME', 'Maine'),
+        ('MI', 'Michigan'),
+        ('MN', 'Minnesota'),
+        ('MO', 'Missouri'),
+        ('MP', 'Northern Mariana Islands'),
+        ('MS', 'Mississippi'),
+        ('MT', 'Montana'),
+        ('NA', 'National'),
+        ('NC', 'North Carolina'),
+        ('ND', 'North Dakota'),
+        ('NE', 'Nebraska'),
+        ('NH', 'New Hampshire'),
+        ('NJ', 'New Jersey'),
+        ('NM', 'New Mexico'),
+        ('NV', 'Nevada'),
+        ('NY', 'New York'),
+        ('OH', 'Ohio'),
+        ('OK', 'Oklahoma'),
+        ('OR', 'Oregon'),
+        ('PA', 'Pennsylvania'),
+        ('PR', 'Puerto Rico'),
+        ('RI', 'Rhode Island'),
+        ('SC', 'South Carolina'),
+        ('SD', 'South Dakota'),
+        ('TN', 'Tennessee'),
+        ('TX', 'Texas'),
+        ('UT', 'Utah'),
+        ('VA', 'Virginia'),
+        ('VI', 'Virgin Islands'),
+        ('VT', 'Vermont'),
+        ('WA', 'Washington'),
+        ('WI', 'Wisconsin'),
+        ('WV', 'West Virginia'),
+        ('WY', 'Wyoming'),
+        ('', '---------------'),
+        ('AB', 'Alberta'),
+        ('BC', 'British Columbia'),
+        ('MB', 'Manitoba'),
+        ('NB', 'New Brunswick'),
+        ('NL', 'Newfoundland and Labrador'),
+        ('NT', 'Northwest Territories'),
+        ('NS', 'Nova Scotia'),
+        ('NU', 'Nunavut'),
+        ('ON', 'Ontario'),
+        ('PE', 'Prince Edward Island'),
+        ('QC', 'Quebec'),
+        ('SK', 'Saskatchewan'),
+        ('YT', 'Yukon'),
+    )
 
     billing_detail_first_name = CharField(_("First name"), max_length=100)
     billing_detail_last_name = CharField(_("Last name"), max_length=100)
     billing_detail_street = CharField(_("Street"), max_length=100)
     billing_detail_city = CharField(_("City/Suburb"), max_length=100)
-    billing_detail_state = CharField(_("State/Region"), max_length=100)
+    billing_detail_state = CharField(_("State/Region"), max_length=100, choices=STATES_PROVINCES)
     billing_detail_postcode = CharField(_("Zip/Postcode"), max_length=10)
     billing_detail_country = CharField(_("Country"), max_length=100)
     billing_detail_phone = CharField(_("Phone"), max_length=20)
@@ -405,14 +495,14 @@ class Order(SiteRelated):
     shipping_detail_last_name = CharField(_("Last name"), max_length=100)
     shipping_detail_street = CharField(_("Street"), max_length=100)
     shipping_detail_city = CharField(_("City/Suburb"), max_length=100)
-    shipping_detail_state = CharField(_("State/Region"), max_length=100)
+    shipping_detail_state = CharField(_("State/Region"), max_length=100, choices=STATES_PROVINCES)
     shipping_detail_postcode = CharField(_("Zip/Postcode"), max_length=10)
     shipping_detail_country = CharField(_("Country"), max_length=100)
     shipping_detail_phone = CharField(_("Phone"), max_length=20)
     additional_instructions = models.TextField(_("Additional instructions"),
                                                blank=True)
     time = models.DateTimeField(_("Time"), auto_now_add=True, null=True)
-    key = CharField(max_length=40)
+    key = CharField(max_length=40, db_index=True)
     user_id = models.IntegerField(blank=True, null=True)
     shipping_type = CharField(_("Shipping type"), max_length=50, blank=True)
     shipping_total = fields.MoneyField(_("Shipping total"))
@@ -550,7 +640,11 @@ class Cart(models.Model):
         item, created = self.items.get_or_create(**kwargs)
         if created:
             item.description = force_text(variation)
-            item.unit_price = variation.price()
+            if variation.core_charge:
+                item.core_charge = variation.core_charge
+                item.unit_price = variation.core_charge + variation.price()
+            else:
+                item.unit_price = variation.price()
             item.url = variation.product.get_absolute_url()
             image = variation.image
             if image is not None:
@@ -628,6 +722,7 @@ class SelectedProduct(models.Model):
     quantity = models.IntegerField(_("Quantity"), default=0)
     unit_price = fields.MoneyField(_("Unit price"), default=Decimal("0"))
     total_price = fields.MoneyField(_("Total price"), default=Decimal("0"))
+    core_charge = fields.MoneyField(_("Core Charge"), default=Decimal("0"))
 
     class Meta:
         abstract = True

@@ -1,5 +1,6 @@
 from __future__ import unicode_literals
 from future.builtins import super, zip
+
 """
 Admin classes for all the shop models.
 
@@ -31,6 +32,7 @@ are then pushed back onto the one variation for the product.
 from copy import deepcopy
 
 from django.contrib import admin
+from django.contrib.admin.templatetags.admin_static import static
 from django.db.models import ImageField
 from django.utils.translation import ugettext_lazy as _
 
@@ -155,8 +157,8 @@ else:
 class ProductAdmin(DisplayableAdmin):
 
     class Media:
-        js = ("cartridge/js/admin/product_variations.js",)
-        css = {"all": ("cartridge/css/admin/product.css",)}
+        js = (static("cartridge/js/admin/product_variations.js"),)
+        css = {"all": (static("cartridge/css/admin/product.css"),)}
 
     list_display = product_list_display
     list_display_links = ("admin_thumb", "title")
@@ -297,7 +299,7 @@ if HAS_PDF:
 class OrderAdmin(admin.ModelAdmin):
 
     class Media:
-        css = {"all": ("cartridge/css/admin/order.css",)}
+        css = {"all": (static("cartridge/css/admin/order.css"),)}
 
     ordering = ("status", "-id")
     list_display = order_list_display
@@ -316,7 +318,7 @@ class OrderAdmin(admin.ModelAdmin):
         (None, {"fields": ("additional_instructions", ("shipping_total",
             "shipping_type"), ('tax_total', 'tax_type'),
              ("discount_total", "discount_code"), "item_total",
-            ("total", "status"), "transaction_id")}),
+            ("total", "status"), "transaction_id", "shipping_label")}),
     )
 
     def change_view(self, *args, **kwargs):
